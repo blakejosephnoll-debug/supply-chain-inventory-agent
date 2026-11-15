@@ -535,6 +535,13 @@ class InventoryDecisionAgent:
             scores["QUANTITY_DISCOUNT"] += 2.5
             reasons["QUANTITY_DISCOUNT"].append("Detected multiple price tier levels")
 
+        # Price schedules may be described without the word "discount".
+        # Require multiple prices with quantity thresholds to avoid misclassifying EOQ.
+        price_tiers = self._parse_discount_schedule(query)
+        if len(price_tiers) >= 2 and len({t["unit_price"] for t in price_tiers}) >= 2:
+            scores["QUANTITY_DISCOUNT"] += 7.0
+            reasons["QUANTITY_DISCOUNT"].append("Detected multiple unit prices tied to order quantity thresholds")
+
         # 2. Newsvendor keywords
         if any(term in q for term in ["newsvendor", "newsboy", "single period", "single-period", "perishable", "spoilage", "seasonal"]):
             scores["NEWSVENDOR"] += 5.0
@@ -753,6 +760,21 @@ class InventoryDecisionAgent:
             add(m, m.group(2), m.group(3), m.group(1))
         for m in re.finditer(
             price + r"\s*(?:per\s+unit\s*)?(?:for|at)\s*(?:orders?\s+of\s*)?" + open_q,
+            text, re.IGNORECASE,
+        ):
+            add(m, m.group(2), None, m.group(1))
+
+        # Price-first lower bracket: '$12 per unit for orders below 500 units'.
+        for m in re.finditer(
+            price + r"\s*(?:per\s+unit\s*)?(?:for|at)\s*(?:orders?\s*)?(?:below|under|less\s+than)\s*(" + num + r")\s*(?:units?)?",
+            text, re.IGNORECASE,
+        ):
+            upper = float(m.group(2).replace(",", "")) - 1
+            add(m, "1", str(upper), m.group(1))
+
+        # Price-first open bracket: '$11 for orders of 1,000 units or more'.
+        for m in re.finditer(
+            price + r"\s*(?:per\s+unit\s*)?(?:for|at)\s*(?:orders?\s+of\s*)?(" + num + r")\s*units?\s*(?:or\s+more|and\s+up|or\s+above)",
             text, re.IGNORECASE,
         ):
             add(m, m.group(2), None, m.group(1))

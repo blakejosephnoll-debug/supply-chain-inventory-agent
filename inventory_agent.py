@@ -242,28 +242,52 @@ def extract_demands(text: str) -> Tuple[Optional[float], Optional[float], Option
 
 
 def extract_lead_times(text: str) -> Tuple[Optional[float], float]:
-    """Extract lead-time mean independently from its standard deviation."""
+    """Extract lead-time mean and standard deviation, normalized to calendar days.
+
+    Supports explicit lead-time standard deviations and the contextual form
+    "lead time is 3 weeks with a standard deviation of 0.5 weeks".
+    """
     num = r"([0-9][0-9,]*(?:\.[0-9]+)?)"
+    unit = r"(days?|weeks?|months?)?"
+
+    def in_days(value: str, units: Optional[str]) -> float:
+        multiplier = 7 if units and units.lower().startswith("week") else (30 if units and units.lower().startswith("month") else 1)
+        return float(value.replace(",", "")) * multiplier
+
+    mean_patterns = [
+        rf"\b(?:(?:average|mean|expected|supplier|delivery|replenishment|constant|fixed)\s+)?lead[\s-]*time\s*(?:is|of|equals|averages|:|=)?\s*{num}\s*{unit}",
+        rf"\blead[\s-]*time\s+is\s+(?:a\s+)?constant\s+(?:of\s+)?{num}\s*{unit}",
+    ]
+    mean = None
+    mean_match = None
+    for pattern in mean_patterns:
+        mean_match = re.search(pattern, text, re.IGNORECASE)
+        if mean_match:
+            mean = in_days(mean_match.group(1), mean_match.group(2))
+            break
+
     std_patterns = [
-        rf"\blead[\s-]*time\s+(?:standard\s+deviation|std\.?\s*dev\.?|sigma|variability)\s*(?:is|of|:|=)?\s*{num}",
-        rf"\b(?:standard\s+deviation|std\.?\s*dev\.?|sigma)\s+of\s+lead[\s-]*time\s*(?:is|of|:|=)?\s*{num}",
+        rf"\blead[\s-]*time\s+(?:standard\s+deviation|std\.?\s*dev\.?|sigma|variability)\s*(?:is|of|:|=)?\s*{num}\s*{unit}",
+        rf"\b(?:standard\s+deviation|std\.?\s*dev\.?|sigma)\s+of\s+lead[\s-]*time\s*(?:is|of|:|=)?\s*{num}\s*{unit}",
     ]
     std = 0.0
     for pattern in std_patterns:
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            std = _clean_num(m.group(1)) or 0.0
-            break
-    mean_patterns = [
-        rf"\b(?:(?:average|mean|expected|supplier|delivery|replenishment|constant|fixed)\s+)?lead[\s-]*time\s*(?:is|of|equals|averages|:|=)?\s*{num}\s*(?:days|weeks|months)?",
-        rf"\blead[\s-]*time\s+is\s+(?:a\s+)?constant\s+(?:of\s+)?{num}",
-    ]
-    mean = None
-    for pattern in mean_patterns:
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            mean = _clean_num(m.group(1))
-            break
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            std = in_days(match.group(1), match.group(2))
+            return mean, std
+
+    # Contextual lead-time variability: "lead time is 3 weeks with a
+    # standard deviation of 0.5 weeks". Do not capture demand variability
+    # earlier in the sentence.
+    if mean_match:
+        following = text[mean_match.end():]
+        context = re.match(
+            rf"\s*(?:,\s*)?(?:with|and)\s+(?:a\s+)?(?:standard\s+deviation|std\.?\s*dev\.?|sigma)\s*(?:is|of|:|=)?\s*{num}\s*{unit}",
+            following, re.IGNORECASE,
+        )
+        if context:
+            std = in_days(context.group(1), context.group(2))
     return mean, std
 
 

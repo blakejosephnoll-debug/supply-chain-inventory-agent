@@ -230,6 +230,14 @@ def extract_demands(text: str) -> Tuple[Optional[float], Optional[float], Option
             if not re.search(r"lead[\s-]*time\s*$", preceding):
                 std = _clean_num(m.group(1))
                 break
+    # If annual demand not found, check for monthly demand and convert to annual
+    if annual is None:
+        # Pattern: e.g., "1,000 units per month" or "1000 units/month"
+        m_month = re.search(r"([0-9][0-9,]*)(?:\s*units?)?\s*(?:per|/)\s*month", text, re.IGNORECASE)
+        if m_month:
+            monthly_val = _clean_num(m_month.group(1))
+            if monthly_val is not None:
+                annual = monthly_val * 12
     return annual, average, std
 
 
